@@ -1,0 +1,6 @@
+{
+  "name": "Terminal Keyboard",
+  "description": "A terminal-style developer keyboard for Android featuring ESC, Ctrl, Tab, Arrow keys, custom snippets, and system-wide IME integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
