@@ -4,9 +4,12 @@ import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -46,14 +49,26 @@ class TerminalInputMethodService : InputMethodService(), LifecycleOwner, SavedSt
         repository = SnippetRepository(applicationContext)
     }
 
-    override fun onCreateInputView(): View {
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+    override fun onEvaluateInputViewShown(): Boolean {
+        super.onEvaluateInputViewShown()
+        return true
+    }
 
+    override fun onEvaluateFullscreenMode(): Boolean {
+        return false
+    }
+
+    override fun onCreateInputView(): View {
         val composeView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setViewTreeLifecycleOwner(this@TerminalInputMethodService)
             setViewTreeSavedStateRegistryOwner(this@TerminalInputMethodService)
             setViewTreeViewModelStoreOwner(this@TerminalInputMethodService)
+
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
 
             setContent {
                 val settings by repository.settings.collectAsState()
@@ -77,8 +92,13 @@ class TerminalInputMethodService : InputMethodService(), LifecycleOwner, SavedSt
                         },
                         onEnter = {
                             val ic = currentInputConnection ?: return@TerminalKeyboardView
-                            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-                            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+                            val info = currentInputEditorInfo
+                            if (info != null && info.actionId != 0) {
+                                ic.performEditorAction(info.actionId)
+                            } else {
+                                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+                            }
                         },
                         onTab = {
                             val ic = currentInputConnection ?: return@TerminalKeyboardView
@@ -115,10 +135,49 @@ class TerminalInputMethodService : InputMethodService(), LifecycleOwner, SavedSt
         return composeView
     }
 
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        updateLifecycleToActive()
+    }
+
+    override fun onWindowShown() {
+        super.onWindowShown()
+        updateLifecycleToActive()
+    }
+
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        updateLifecycleToInactive()
+    }
+
+    override fun onWindowHidden() {
+        super.onWindowHidden()
+        updateLifecycleToInactive()
+    }
+
+    private fun updateLifecycleToActive() {
+        when (lifecycleRegistry.currentState) {
+            Lifecycle.State.INITIALIZED, Lifecycle.State.CREATED -> {
+                lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+                lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+            }
+            Lifecycle.State.STARTED -> {
+                lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+            }
+            else -> {}
+        }
+    }
+
+    private fun updateLifecycleToInactive() {
+        if (lifecycleRegistry.currentState == Lifecycle.State.RESUMED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        updateLifecycleToInactive()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         store.clear()
     }
